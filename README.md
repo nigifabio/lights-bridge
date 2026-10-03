@@ -73,6 +73,7 @@ known state). See [`config.example.json`](config.example.json).
 | `host`, `port` | `0.0.0.0`, `8765` | Listen address. `LIGHTS_HOST` / `LIGHTS_PORT` override them. |
 | `idle_disconnect` | `120` | Seconds the Bluetooth connection is kept after the last command. While it is held, the vendor phone app cannot connect to that light. |
 | `music` | `true` | Offer the follow-music pattern (needs Sonos speakers on the LAN). |
+| `spotify` | unset | Optional, see Follow music. |
 | `lights[]` | `[]` | `id`, `name`, `type`, `address`, and `segments` for Govee RGBIC lights. |
 
 ## API
@@ -105,9 +106,23 @@ A command is retried up to three times, reconnecting in between, before the page
 The `music` pattern follows what Sonos is playing (discovered with [SoCo](https://github.com/SoCo/SoCo),
 polled every 2 s). There is no audio capture: the bridge runs a beat clock at the track's tempo,
 anchored on the play position, so the pulse matches the tempo but is not locked to the exact beat.
-The tempo comes from [ReccoBeats](https://reccobeats.com) when the Sonos track URI carries a
-Spotify track id (playing from the Sonos app). With Spotify Connect, radio and other sources the
-URI has no track id and the clock falls back to 120 BPM. Each track gets its own colour.
+The tempo comes from [ReccoBeats](https://reccobeats.com) when the track's Spotify id is known.
+Sonos provides it when you play from the Sonos app. During Spotify Connect sessions Sonos hides
+it; add the optional `spotify` setting below and the bridge asks Spotify instead, which also gives
+the play position in milliseconds for a tighter pulse. Radio, other sources and tracks ReccoBeats
+does not know fall back to 120 BPM. Each track gets its own colour.
+
+```json
+"spotify": {
+  "client_id": "...", "client_secret": "...",
+  "cache_path": "/data/spotify-cache"
+}
+```
+
+`cache_path` is a token cache from an authorisation-code login with the
+`user-read-currently-playing` scope, in [spotipy](https://github.com/spotipy-dev/spotipy)'s format;
+the bridge only reads it. `credentials_file` can replace the two client keys with a JSON file that
+holds them. Only playback on the authorised Spotify account is seen.
 
 ## Limits worth knowing
 

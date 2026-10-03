@@ -20,6 +20,7 @@ from aiohttp import web
 
 from .drivers import KINDS, detect
 from .music import Music
+from .spotify import Spotify
 
 log = logging.getLogger("lights")
 STATIC = Path(__file__).parent / "static"
@@ -47,6 +48,8 @@ class Bridge:
         self.music = music if music is not None else Music()
         if not self.config.get("music"):
             self.music.available = False
+        if self.config.get("spotify"):
+            self.music.spotify = Spotify(self.config["spotify"])
         saved = json.loads(self.state_file.read_text()) if self.state_file.exists() else {}
         self.lights = {}
         for cfg in self.config["lights"]:

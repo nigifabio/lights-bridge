@@ -1,7 +1,8 @@
 """Follow-music pattern: a beat clock at the tempo of whatever Sonos is playing.
 
-There is no audio capture. The tempo comes from ReccoBeats when the Sonos track URI carries a
-Spotify track id, else DEFAULT_BPM. The clock is anchored on the Sonos play position (1 s
+There is no audio capture. The tempo comes from ReccoBeats when the track's Spotify id is known:
+from the Sonos track URI, or from Spotify itself (see spotify.py) during Spotify Connect sessions,
+where Sonos hides it. Otherwise DEFAULT_BPM. The clock is anchored on the Sonos play position (1 s
 resolution), so the pulse matches the tempo but is not locked to the exact beat.
 """
 import asyncio
@@ -14,6 +15,7 @@ import zlib
 import aiohttp
 
 from .patterns import hsv, scale
+from .spotify import merge
 
 try:
     import soco
@@ -32,6 +34,7 @@ class Music:
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.available = soco is not None
+        self.spotify = None  # optional Spotify client, fills in what Sonos hides (Spotify Connect)
         self.devices = {}  # uid -> SoCo; never shrinks: a partial discovery must not drop a speaker
         self.last_discover = float("-inf")
         self.last_heard = float("-inf")
@@ -105,8 +108,8 @@ class Music:
             self.bpm, self.bpm_known = bpm or self.DEFAULT_BPM, bool(bpm)
             self.t0 = stamp - now["pos"]
             log.info("now playing: %s - %s, %s BPM", self.artist, self.title, bpm or "unknown")
-        elif abs((stamp - self.t0) - now["pos"]) > 2.5:  # seek or pause/resume
-            self.t0 = stamp - now["pos"]
+        elif abs((stamp - self.t0) - now["pos"]) > (0.3 if now.get("precise") else 2.5):
+            self.t0 = stamp - now["pos"]  # seek, pause/resume, or drift against a precise position
 
     async def run(self, wanted):
         """Poll Sonos every 2 s while wanted() says a light is following the music."""
@@ -115,7 +118,10 @@ class Music:
             if not self.available or not wanted():
                 await asyncio.sleep(1)
                 continue
-            await self.update(await loop.run_in_executor(None, self._poll_sonos))
+            now = await loop.run_in_executor(None, self._poll_sonos)
+            if now and self.spotify and not SPOTIFY_ID.search(now["key"]):
+                now = merge(now, await self.spotify.now_playing())
+            await self.update(now)
             await asyncio.sleep(2)
 
     def frame(self, n, pulse=True, every=1):
