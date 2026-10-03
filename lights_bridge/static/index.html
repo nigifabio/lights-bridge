@@ -15,6 +15,7 @@
   @media (prefers-color-scheme: light) {
     :root { --bg: #f3f4f7; --card: #ffffff; --line: #e2e4ea; --text: #15171c; --muted: #6a7080; --track: #e2e4ea; }
   }
+  [hidden] { display: none !important; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
@@ -61,6 +62,9 @@
   .chip { border: 1px solid var(--line); background: transparent; color: var(--text); padding: 8px 13px; border-radius: 999px; font: inherit; font-size: 14px; cursor: pointer; }
   .chip.sel { background: var(--accent); border-color: var(--accent); color: #1a1300; font-weight: 600; }
   .speed[hidden] { display: none; }
+  .tabs { max-width: 980px; margin: 0 auto 16px; display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tab { background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; font-size: 15px; padding: 10px 14px; cursor: pointer; margin-bottom: -1px; }
+  .tab.sel { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
   #adder { max-width: 980px; margin: 0 auto 16px; }
   #adder .top { margin-bottom: 4px; }
   .dev { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
@@ -77,10 +81,13 @@
 <body>
 <header>
   <h1>Lights</h1>
-  <button class="btn" id="addbtn" aria-label="Add a light">＋ Add</button>
   <button class="btn" id="allon">All on</button>
   <button class="btn" id="alloff">All off</button>
 </header>
+<nav class="tabs" role="tablist">
+  <button class="tab sel" role="tab" id="tab-lights" aria-selected="true">Lights</button>
+  <button class="tab" role="tab" id="tab-add" aria-selected="false">Add a light</button>
+</nav>
 <section id="adder" class="card" hidden>
   <div class="top"><div class="name"><b>Add a light</b><small id="scanmsg">Plug the light in, close its phone app, then scan.</small></div>
     <button class="btn" id="scanbtn">Scan</button></div>
@@ -220,7 +227,7 @@ async function load() {
     const lights = await (await fetch("api/lights")).json();
     document.getElementById("empty")?.remove();
     if (!lights.length) {
-      root.innerHTML = '<div id="empty">No lights yet. Use “＋ Add” to scan for them.</div>';
+      root.innerHTML = '<div id="empty">No lights yet. Open the “Add a light” tab to scan for them.</div>';
       for (const id in cards) delete cards[id];
     }
     for (const id of Object.keys(cards)) if (!lights.some(l => l.id === id)) { cards[id].el.remove(); delete cards[id]; }
@@ -238,7 +245,18 @@ async function load() {
 // ---- add a light: scan, pick, name -------------------------------
 const adder = document.getElementById("adder"), found = document.getElementById("found"),
       scanmsg = document.getElementById("scanmsg"), scanbtn = document.getElementById("scanbtn");
-document.getElementById("addbtn").onclick = () => { adder.hidden = !adder.hidden; };
+function showTab(add) {
+  adder.hidden = !add;
+  root.hidden = add;
+  document.getElementById("allon").hidden = document.getElementById("alloff").hidden = add;
+  for (const [id, on] of [["tab-lights", !add], ["tab-add", add]]) {
+    const t = document.getElementById(id);
+    t.classList.toggle("sel", on);
+    t.setAttribute("aria-selected", on);
+  }
+}
+document.getElementById("tab-lights").onclick = () => showTab(false);
+document.getElementById("tab-add").onclick = () => showTab(true);
 scanbtn.onclick = async () => {
   scanbtn.disabled = true; scanmsg.textContent = "Scanning for about 8 seconds…"; found.innerHTML = "";
   try {
@@ -272,6 +290,7 @@ function row(d) {
     const out = await r.json();
     if (!r.ok) { scanmsg.textContent = out.error; return; }
     btn.textContent = "Added"; btn.disabled = true;
+    scanmsg.textContent = `${out.name} added. It is on the Lights tab.`;
     load();
   };
   return el;

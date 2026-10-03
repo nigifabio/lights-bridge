@@ -38,7 +38,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m lights_bridge
 ```
 
-Open `http://<host>:8765`, press **＋ Add**, then **Scan**. Plug the light in and close its phone
+Open `http://<host>:8765`, go to the **Add a light** tab and press **Scan**. Plug the light in and close its phone
 app first: a light that is connected to a phone does not advertise.
 
 To keep it running, see the example unit [`lights-bridge.service`](lights-bridge.service).
