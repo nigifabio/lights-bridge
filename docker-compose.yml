@@ -1,0 +1,13 @@
+# The container talks to the HOST's Bluetooth daemon (BlueZ) over D-Bus, so the host needs a
+# working, powered Bluetooth adapter (`bluetoothctl show` -> Powered: yes). Linux hosts only.
+services:
+  lights-bridge:
+    build: .
+    # image: ghcr.io/nigifabio/lights-bridge:latest
+    restart: unless-stopped
+    network_mode: host            # Sonos discovery (follow-music) needs the LAN's multicast
+    volumes:
+      - /run/dbus:/run/dbus:ro    # BlueZ on the host
+      - ./data:/data              # config.json + state.json
+    # environment:
+    #   LIGHTS_PORT: "8765"

@@ -1,0 +1,10 @@
+{
+  "host": "0.0.0.0",
+  "port": 8765,
+  "idle_disconnect": 120,
+  "music": true,
+  "lights": [
+    {"id": "floor-lamp", "name": "Floor lamp", "type": "govee", "address": "AA:BB:CC:DD:EE:01", "segments": 7},
+    {"id": "desk-strip", "name": "Desk strip", "type": "melk", "address": "AA:BB:CC:DD:EE:02"}
+  ]
+}

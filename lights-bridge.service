@@ -1,0 +1,19 @@
+# Example systemd unit. Adjust User and the two paths, then:
+#   sudo cp lights-bridge.service /etc/systemd/system/ && sudo systemctl enable --now lights-bridge
+[Unit]
+Description=Lights bridge (BLE lights HTTP API + web page)
+After=bluetooth.target network-online.target
+Wants=bluetooth.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/lights-bridge
+Environment=LIGHTS_DATA=/home/pi/lights-bridge/data
+# Some boards boot with Bluetooth soft-blocked: unblock it (as root) and power the adapter
+ExecStartPre=+/bin/sh -c 'for r in /sys/class/rfkill/rfkill*; do [ "$(cat $r/type)" = bluetooth ] && echo 0 > $r/soft; done; sleep 1; bluetoothctl power on || true'
+ExecStart=/home/pi/lights-bridge/.venv/bin/python -m lights_bridge
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
