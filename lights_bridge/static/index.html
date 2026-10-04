@@ -66,6 +66,21 @@
   .tab { background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); font: inherit; font-size: 15px; padding: 10px 14px; cursor: pointer; margin-bottom: -1px; }
   .tab.sel { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
   #adder { max-width: 980px; margin: 0 auto 16px; }
+  #remotes { max-width: 980px; margin: 0 auto; }
+  #remotes .card { margin-bottom: 16px; }
+  #remotes .top { margin-bottom: 4px; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-top: 12px; }
+  .key { position: relative; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 12px; padding: 14px 6px; font: inherit; font-size: 14px; cursor: pointer; min-height: 48px; }
+  .key:active { transform: scale(.96); }
+  .key.new { border-style: dashed; color: var(--muted); background: transparent; }
+  .key.wait { border-color: var(--accent); color: var(--accent); }
+  .key.ok { border-color: #35c46a; }
+  .key .x { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; background: var(--danger); color: #fff; font-size: 13px; line-height: 22px; text-align: center; }
+  .rtools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  .rtools input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14px; flex: 1; min-width: 120px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .seg button { background: none; border: 0; color: var(--muted); font: inherit; font-size: 13px; padding: 6px 12px; cursor: pointer; }
+  .seg button.sel { background: var(--accent); color: #1a1300; font-weight: 600; }
   #adder .top { margin-bottom: 4px; }
   .dev { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
   .dev .who { flex: 1; min-width: 150px; }
@@ -86,8 +101,24 @@
 </header>
 <nav class="tabs" role="tablist">
   <button class="tab sel" role="tab" id="tab-lights" aria-selected="true">Lights</button>
+  <button class="tab" role="tab" id="tab-remotes" aria-selected="false">Remotes</button>
   <button class="tab" role="tab" id="tab-add" aria-selected="false">Add a light</button>
 </nav>
+<section id="remotes" hidden>
+  <div class="card" id="hubcard">
+    <div class="top"><div class="name"><b>Remote hub</b><small id="hubmsg"></small></div>
+      <button class="btn" id="hubfind">Find hub</button></div>
+    <div id="hubs"></div>
+    <div class="dev"><input id="hubip" placeholder="or type the hub's IP address" aria-label="Hub IP address"><button class="btn" id="hubadd">Add</button></div>
+  </div>
+  <div class="card" id="newremote" hidden>
+    <div class="top"><div class="name"><b>New remote</b><small>Pick a starting set of buttons; you teach each one from the real remote.</small></div></div>
+    <div class="dev"><input id="rname" placeholder="Name, e.g. Neon sign" aria-label="Remote name">
+      <select id="rtpl" aria-label="Button set"></select><select id="rhub" aria-label="Hub"></select>
+      <button class="btn" id="radd">Create</button></div>
+  </div>
+  <div id="rlist"></div>
+</section>
 <section id="adder" class="card" hidden>
   <div class="top"><div class="name"><b>Add a light</b><small id="scanmsg">Plug the light in, close its phone app, then scan.</small></div>
     <button class="btn" id="scanbtn">Scan</button></div>
@@ -245,18 +276,128 @@ async function load() {
 // ---- add a light: scan, pick, name -------------------------------
 const adder = document.getElementById("adder"), found = document.getElementById("found"),
       scanmsg = document.getElementById("scanmsg"), scanbtn = document.getElementById("scanbtn");
-function showTab(add) {
-  adder.hidden = !add;
-  root.hidden = add;
-  document.getElementById("allon").hidden = document.getElementById("alloff").hidden = add;
-  for (const [id, on] of [["tab-lights", !add], ["tab-add", add]]) {
-    const t = document.getElementById(id);
-    t.classList.toggle("sel", on);
-    t.setAttribute("aria-selected", on);
+function showTab(which) {
+  adder.hidden = which !== "add";
+  root.hidden = which !== "lights";
+  document.getElementById("remotes").hidden = which !== "remotes";
+  document.getElementById("allon").hidden = document.getElementById("alloff").hidden = which !== "lights";
+  for (const id of ["lights", "remotes", "add"]) {
+    const t = document.getElementById("tab-" + id);
+    t.classList.toggle("sel", id === which);
+    t.setAttribute("aria-selected", id === which);
   }
+  if (which === "remotes") loadRemotes();
 }
-document.getElementById("tab-lights").onclick = () => showTab(false);
-document.getElementById("tab-add").onclick = () => showTab(true);
+for (const id of ["lights", "remotes", "add"]) document.getElementById("tab-" + id).onclick = () => showTab(id);
+
+// ---- remotes: infrared / radio buttons replayed through a hub ------
+const hubmsg = document.getElementById("hubmsg"), rlist = document.getElementById("rlist");
+const editing = {}, learnKind = {};   // per remote: edit mode, "ir" | "rf"
+let R = { hubs: [], remotes: [], templates: [] };
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || "request failed");
+  return out;
+}
+async function loadRemotes() {
+  try { R = await api("GET", "api/remotes"); renderRemotes(); } catch (e) { hubmsg.textContent = e.message; }
+}
+function renderRemotes() {
+  const hubs = document.getElementById("hubs");
+  hubs.innerHTML = "";
+  if (!R.hubs.length && !hubmsg.textContent) hubmsg.textContent = "No hub yet. Connect the hub to your Wi-Fi with its app first, then find it here.";
+  if (R.hubs.length && hubmsg.textContent.startsWith("No hub")) hubmsg.textContent = "";
+  for (const h of R.hubs) {
+    const el = document.createElement("div");
+    el.className = "dev";
+    el.innerHTML = `<div class="who"><b>${esc(h.name)}</b><small>${esc(h.model)} · ${esc(h.host)} · infrared${h.rf ? " + radio" : ""}</small></div><button class="link">Remove</button>`;
+    el.querySelector("button").onclick = act(() => api("DELETE", `api/hubs/${h.id}`));
+    hubs.appendChild(el);
+  }
+  document.getElementById("newremote").hidden = !R.hubs.length;
+  document.getElementById("rtpl").innerHTML = R.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  document.getElementById("rhub").innerHTML = R.hubs.map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join("");
+  document.getElementById("rhub").hidden = R.hubs.length < 2;
+  rlist.innerHTML = "";
+  for (const r of R.remotes) rlist.appendChild(remoteCard(r));
+}
+// run an API call, show its error in the hub line, then redraw
+function act(fn, msgEl) {
+  return async () => {
+    try { const out = await fn(); if (out && out.remotes) R = out; (msgEl || hubmsg).textContent = ""; }
+    catch (e) { (msgEl || hubmsg).textContent = e.message; }
+    renderRemotes();
+  };
+}
+function remoteCard(r) {
+  const edit = !!editing[r.id], kind = learnKind[r.id] || "ir";
+  const hub = R.hubs.find(h => h.id === r.hub) || {};
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `<div class="top"><div class="name"><b>${esc(r.name)}</b><small class="rmsg">${edit
+      ? "Tap a button, then press it on the real remote, pointed at the hub." : "Tap a button to send it. Dashed buttons are not taught yet."}</small></div>
+      <button class="btn redit">${edit ? "Done" : "Edit"}</button></div>
+    <div class="keys"></div>
+    <div class="rtools" ${edit ? "" : "hidden"}>
+      <span class="seg" ${hub.rf ? "" : "hidden"}><button data-k="ir" class="${kind === "ir" ? "sel" : ""}">Infrared</button><button data-k="rf" class="${kind === "rf" ? "sel" : ""}">Radio</button></span>
+      <input placeholder="New button name" aria-label="New button name"><button class="btn badd">Add button</button>
+      <button class="link rdel">Remove remote</button>
+    </div>`;
+  const msg = el.querySelector(".rmsg"), keys = el.querySelector(".keys");
+  for (const b of r.buttons) {
+    const k = document.createElement("button");
+    k.className = "key" + (b.learned ? "" : " new");
+    k.innerHTML = esc(b.name) + (edit ? '<span class="x" aria-label="Delete button">×</span>' : "");
+    k.onclick = async ev => {
+      if (ev.target.classList.contains("x")) return act(() => api("DELETE", `api/remotes/${r.id}/buttons/${b.id}`), msg)();
+      if (edit || !b.learned) {   // teach
+        k.classList.add("wait");
+        msg.textContent = kind === "rf" && hub.rf
+          ? `Radio: hold “${b.name}” on the remote until the hub's light changes (up to 30 s), release, then press it once.`
+          : `Now press “${b.name}” on the real remote, pointed at the hub (30 s).`;
+        try {
+          R = await api("POST", `api/remotes/${r.id}/buttons/${b.id}/learn`, { kind: hub.rf ? kind : "ir" });
+          renderRemotes();
+        } catch (e) { k.classList.remove("wait"); msg.textContent = `“${b.name}” not learned: ${e.message}`; }
+        return;
+      }
+      try { await api("POST", `api/remotes/${r.id}/buttons/${b.id}/press`); k.classList.add("ok"); setTimeout(() => k.classList.remove("ok"), 500); msg.textContent = `Sent “${b.name}”.`; }
+      catch (e) { msg.textContent = e.message; }
+    };
+    keys.appendChild(k);
+  }
+  el.querySelector(".redit").onclick = () => { editing[r.id] = !edit; renderRemotes(); };
+  el.querySelectorAll(".seg button").forEach(s => s.onclick = () => { learnKind[r.id] = s.dataset.k; renderRemotes(); });
+  const input = el.querySelector(".rtools input");
+  el.querySelector(".badd").onclick = act(() => api("POST", `api/remotes/${r.id}/buttons`, { name: input.value }), msg);
+  const del = el.querySelector(".rdel");
+  del.onclick = () => {
+    if (!del.classList.contains("sure")) { del.classList.add("sure"); del.textContent = "Tap again to remove"; return; }
+    act(() => api("DELETE", `api/remotes/${r.id}`))();
+  };
+  return el;
+}
+document.getElementById("hubfind").onclick = async () => {
+  hubmsg.textContent = "Looking for hubs on the network (5 s)…";
+  try {
+    const found = (await api("POST", "api/hubs/discover")).filter(h => !h.added);
+    if (!found.length) { hubmsg.textContent = "No new hub found. Is it on Wi-Fi, with “Lock device” off in its app? You can also type its IP address."; return; }
+    for (const h of found) R = await api("POST", "api/hubs", { host: h.host });
+    hubmsg.textContent = `Added ${found.length} hub${found.length > 1 ? "s" : ""}.`;
+    renderRemotes();
+  } catch (e) { hubmsg.textContent = e.message; }
+};
+document.getElementById("hubadd").onclick = act(() => api("POST", "api/hubs", { host: document.getElementById("hubip").value }));
+document.getElementById("radd").onclick = act(async () => {
+  const out = await api("POST", "api/remotes", { name: document.getElementById("rname").value,
+    template: document.getElementById("rtpl").value, hub: document.getElementById("rhub").value });
+  const made = out.remotes[out.remotes.length - 1];
+  editing[made.id] = true;                      // straight into teaching mode
+  document.getElementById("rname").value = "";
+  return out;
+});
 scanbtn.onclick = async () => {
   scanbtn.disabled = true; scanmsg.textContent = "Scanning for about 8 seconds…"; found.innerHTML = "";
   try {

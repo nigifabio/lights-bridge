@@ -7,6 +7,18 @@ POST   /api/lights/{id}       patch: {"on", "brightness" 1-100, "color" "#rrggbb
 POST   /api/lights/{id}/sync  reconnect and re-read the light's state
 DELETE /api/lights/{id}       remove a light
 POST   /api/scan              scan for BLE devices and say which ones are known light types
+
+Remotes (infrared / 433 MHz buttons replayed through a Broadlink hub), see remotes.py:
+GET    /api/remotes                               hubs, templates, remotes and their buttons
+POST   /api/hubs/discover                         look for hubs on the LAN
+POST   /api/hubs                                  add a hub: {"host", "name"?}
+DELETE /api/hubs/{id}
+POST   /api/remotes                               add a remote: {"name", "hub", "template"?}
+DELETE /api/remotes/{id}
+POST   /api/remotes/{id}/buttons                  add a button: {"name"}
+DELETE /api/remotes/{id}/buttons/{button}
+POST   /api/remotes/{id}/buttons/{button}/learn   {"kind": "ir"|"rf"}, waits for the button press
+POST   /api/remotes/{id}/buttons/{button}/press   {"repeat"?}
 """
 import asyncio
 import json
@@ -20,6 +32,7 @@ from aiohttp import web
 
 from .drivers import KINDS, detect
 from .music import Music
+from .remotes import Remotes
 from .spotify import Spotify
 
 log = logging.getLogger("lights")
@@ -187,13 +200,47 @@ async def scan(request):
         return web.json_response({"error": f"scan failed: {e}"}, status=502)
 
 
+def remote_api(fn):
+    """Run a Remotes call and turn its errors into JSON: 404 unknown id, 400 bad input, 502 hub trouble."""
+    async def handler(request):
+        remotes = request.app["remotes"]
+        try:
+            body = await request.json() if request.can_read_body else {}
+            out = fn(remotes, request.match_info, body)
+            if asyncio.iscoroutine(out):
+                out = await out
+        except KeyError as e:
+            return web.json_response({"error": str(e.args[0])}, status=404)
+        except (ValueError, TypeError, AttributeError) as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except Exception as e:
+            return web.json_response({"error": str(e) or type(e).__name__}, status=502)
+        return web.json_response(out if isinstance(out, list) else remotes.info())
+    return handler
+
+
+REMOTE_ROUTES = [
+    ("GET", "/api/remotes", lambda r, m, b: None),
+    ("POST", "/api/hubs/discover", lambda r, m, b: r.discover()),
+    ("POST", "/api/hubs", lambda r, m, b: r.add_hub(b.get("host"), b.get("name"))),
+    ("DELETE", "/api/hubs/{id}", lambda r, m, b: r.remove_hub(m["id"])),
+    ("POST", "/api/remotes", lambda r, m, b: r.add_remote(b.get("name"), b.get("hub"), b.get("template") or "custom")),
+    ("DELETE", "/api/remotes/{id}", lambda r, m, b: r.remove_remote(m["id"])),
+    ("POST", "/api/remotes/{id}/buttons", lambda r, m, b: r.add_button(m["id"], b.get("name"))),
+    ("DELETE", "/api/remotes/{id}/buttons/{button}", lambda r, m, b: r.remove_button(m["id"], m["button"])),
+    ("POST", "/api/remotes/{id}/buttons/{button}/learn", lambda r, m, b: r.learn(m["id"], m["button"], b.get("kind") or "ir")),
+    ("POST", "/api/remotes/{id}/buttons/{button}/press", lambda r, m, b: r.press(m["id"], m["button"], b.get("repeat") or 1)),
+]
+
+
 async def index(request):
     return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-def create_app(data_dir=None, connector=None, scanner=None, music=None, background=True):
+def create_app(data_dir=None, connector=None, scanner=None, music=None, background=True, hub_backend=None):
     app = web.Application()
     bridge = app["bridge"] = Bridge(data_dir or os.environ.get("LIGHTS_DATA", "data"), connector, scanner, music)
+    app["remotes"] = Remotes(bridge.dir, hub_backend)
 
     async def start(app):
         if background:
@@ -218,6 +265,8 @@ def create_app(data_dir=None, connector=None, scanner=None, music=None, backgrou
         web.delete("/api/lights/{id}", remove_light),
         web.post("/api/scan", scan),
     ])
+    for method, path, fn in REMOTE_ROUTES:
+        app.router.add_route(method, path, remote_api(fn))
     return app
 
 

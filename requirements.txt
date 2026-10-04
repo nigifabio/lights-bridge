@@ -1,3 +1,4 @@
 aiohttp>=3.9
 bleak>=1.0
 soco>=0.30
+broadlink>=0.19

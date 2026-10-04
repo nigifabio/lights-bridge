@@ -10,6 +10,8 @@ phone app, and no way to automate them.
 - **Patterns:** rainbow, sunset, ocean, aurora, forest, breathe, candle, fire, party, plus the
   effects built into the light's own controller.
 - **Follow music:** lights pulse at the tempo of what is playing on Sonos.
+- **Remotes:** replay the buttons of infrared and 433 MHz remotes (TV, fan, neon sign...) through a
+  Broadlink hub, taught from the real remote in the page.
 - **HTTP API:** everything the page does is one `curl` away, for scripts and home automation.
 
 No cloud, no account, no build step: Python, [bleak](https://github.com/hbldh/bleak) and one HTML file.
@@ -21,8 +23,8 @@ No cloud, no account, no build step: Python, [bleak](https://github.com/hbldh/bl
 | `melk` | ELK-BLEDOM family: `ELK-BLEDOM*`, `ELK-BLE*`, `MELK-*`, `LEDBLE-*` strips and lamps | no | Tested on a `MELK-OF21M`. |
 | `govee` | Govee RGBIC lights: `Govee_*`, `ihoment_*` | power, brightness | Tested on an H6076 (7 segments). Set `segments` for other models. |
 
-Lights that only have an infrared or 433 MHz remote and no Bluetooth do not show up in a scan and
-cannot be controlled by this project.
+Lights that only have an infrared or 433 MHz remote and no Bluetooth do not show up in a scan.
+They can still be driven through a hub: see [Remotes](#remotes).
 
 Adding a protocol is one class in [`lights_bridge/drivers.py`](lights_bridge/drivers.py): the frames
 for power, brightness and colour, and the name prefixes the scanner should recognise.
@@ -123,6 +125,31 @@ does not know fall back to 120 BPM. Each track gets its own colour.
 `user-read-currently-playing` scope, in [spotipy](https://github.com/spotipy-dev/spotipy)'s format;
 the bridge only reads it. `credentials_file` can replace the two client keys with a JSON file that
 holds them. Only playback on the authorised Spotify account is seen.
+
+## Remotes
+
+For anything with an infrared or 433 MHz radio remote, the **Remotes** tab replays the remote's
+buttons through a [Broadlink](https://github.com/mjg59/python-broadlink) hub (RM4 Pro for
+infrared + radio, RM4 mini for infrared only).
+
+1. Join the hub to your Wi-Fi (2.4 GHz) with the Broadlink app. In the app's device settings keep
+   **Lock device** off, or the hub refuses local control. The app is not needed after that.
+2. In the Remotes tab press **Find hub** (or type its IP address).
+3. Create a remote from a button set (LED / neon dimmer, TV, speaker, fan, RGB light, or empty).
+4. Tap each button and press the same button on the real remote, pointed at the hub. For radio
+   remotes switch to **Radio**: hold the button until the hub finds the frequency, release, then
+   press it once. Radio remotes with rolling codes (garage doors, some sockets) cannot be learned.
+
+Buttons then send with one tap, or from a script:
+
+```bash
+curl http://localhost:8765/api/remotes
+curl -X POST http://localhost:8765/api/remotes/neon-sign/buttons/on/press
+curl -X POST -H 'Content-Type: application/json' -d '{"repeat":3}' http://localhost:8765/api/remotes/tv/buttons/vol-plus/press
+```
+
+This is one-way: the bridge replays buttons and cannot know whether the device is on. Hubs,
+remotes and learned codes are stored in `remotes.json` in the data directory.
 
 ## Limits worth knowing
 
