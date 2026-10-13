@@ -256,10 +256,14 @@ async function flush(id) {
 async function load() {
   try {
     const lights = await (await fetch("api/lights")).json();
+    let remoteLights = [];
+    try { R = await (await fetch("api/remotes")).json(); remoteLights = R.remotes.filter(isLight); } catch (e) {}
     document.getElementById("empty")?.remove();
-    if (!lights.length) {
+    renderRemoteLights(remoteLights);
+    if (!lights.length && !remoteLights.length) {
       root.innerHTML = '<div id="empty">No lights yet. Open the “Add a light” tab to scan for them.</div>';
       for (const id in cards) delete cards[id];
+      for (const id in rcards) delete rcards[id];
     }
     for (const id of Object.keys(cards)) if (!lights.some(l => l.id === id)) { cards[id].el.remove(); delete cards[id]; }
     for (const l of lights) {
@@ -270,6 +274,47 @@ async function load() {
   } catch (e) {
     const empty = document.getElementById("empty");
     if (empty) empty.textContent = "Bridge unreachable";
+  }
+}
+
+// ---- remotes that can switch a light (learned On + Off) also get a card here ----
+const rcards = {};   // remote id -> element
+const learned = (r, id) => r.buttons.some(b => b.id === id && b.learned);
+function isLight(r) { return learned(r, "on") && learned(r, "off"); }
+async function pressRemote(r, bid, msg) {
+  try {
+    const out = await api("POST", `api/remotes/${r.id}/buttons/${bid}/press`);
+    R = out;
+    renderRemoteLights(R.remotes.filter(isLight));
+  } catch (e) { msg.textContent = "⚠ " + e.message; msg.classList.add("err"); }
+}
+function renderRemoteLights(list) {
+  for (const id of Object.keys(rcards)) if (!list.some(r => r.id === id)) { rcards[id].remove(); delete rcards[id]; }
+  for (const r of list) {
+    const sig = JSON.stringify(r);
+    let el = rcards[r.id];
+    if (el && el.dataset.sig === sig) continue;
+    if (!el) { el = rcards[r.id] = document.createElement("section"); root.appendChild(el); }
+    el.dataset.sig = sig;
+    el.className = "card" + (r.on ? " on" : "");
+    el.style.setProperty("--glow", r.on ? "#ff7a1a" : "transparent");
+    const levels = r.buttons.filter(b => b.learned && /^\d+%$/.test(b.name));
+    const steps = r.buttons.filter(b => b.learned && ["brighter", "dimmer"].includes(b.id));
+    const others = r.buttons.filter(b => b.learned && !["on", "off"].includes(b.id) && !levels.includes(b) && !steps.includes(b));
+    const chips = bs => bs.map(b => `<button class="chip" data-b="${b.id}">${esc(b.name)}</button>`).join("");
+    el.innerHTML = `
+      <div class="top">
+        <div class="bulb">💡</div>
+        <div class="name"><b>${esc(r.name)}</b><small>${r.on == null ? "Remote · state unknown" : r.on ? "On · last sent from here" : "Off · last sent from here"}</small></div>
+        <label class="switch"><input type="checkbox" aria-label="Power" ${r.on ? "checked" : ""}><span></span></label>
+      </div>
+      ${levels.length || steps.length ? `<h2>Brightness</h2><div class="chips">${chips(steps)}${chips(levels)}</div>` : ""}
+      ${others.length ? `<h2>Buttons</h2><div class="chips">${chips(others)}</div>` : ""}
+      <div class="foot"><button class="link more">Teach more buttons</button></div>`;
+    const msg = el.querySelector(".name small");
+    el.querySelector(".switch input").onchange = e => pressRemote(r, e.target.checked ? "on" : "off", msg);
+    el.querySelectorAll(".chip").forEach(c => c.onclick = () => pressRemote(r, c.dataset.b, msg));
+    el.querySelector(".more").onclick = () => { editing[r.id] = true; showTab("remotes"); };
   }
 }
 
@@ -437,8 +482,9 @@ function row(d) {
   return el;
 }
 
-document.getElementById("allon").onclick = () => Object.keys(cards).forEach(id => send(id, { on: true }, 0));
-document.getElementById("alloff").onclick = () => Object.keys(cards).forEach(id => send(id, { on: false }, 0));
+const allRemotes = bid => R.remotes.filter(isLight).forEach(r => pressRemote(r, bid, rcards[r.id].querySelector(".name small")));
+document.getElementById("allon").onclick = () => { Object.keys(cards).forEach(id => send(id, { on: true }, 0)); allRemotes("on"); };
+document.getElementById("alloff").onclick = () => { Object.keys(cards).forEach(id => send(id, { on: false }, 0)); allRemotes("off"); };
 load();
 setInterval(() => { if (!document.hidden) load(); }, 5000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });

@@ -137,7 +137,8 @@ class Remotes:
         return {
             "hubs": self.data["hubs"],
             "templates": [{"id": k, "name": v[0]} for k, v in TEMPLATES.items()],
-            "remotes": [{"id": r["id"], "name": r["name"], "hub": r["hub"],
+            # "on" is only what was last sent from here (None = never): a remote cannot report state
+            "remotes": [{"id": r["id"], "name": r["name"], "hub": r["hub"], "on": r.get("on"),
                          "buttons": [{"id": b["id"], "name": b["name"], "learned": bool(b.get("code"))}
                                      for b in r["buttons"]]} for r in self.data["remotes"]],
         }
@@ -242,3 +243,6 @@ class Remotes:
         async with self.lock:
             for _ in range(max(1, min(10, int(repeat)))):
                 await self._run(self.backend.send, hub, code)
+        if bid in ("on", "off"):  # remember it, so the Lights tab can show a switch
+            self._remote(rid)["on"] = bid == "on"
+            self.save()

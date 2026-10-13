@@ -147,3 +147,20 @@ def test_api(tmp_path):
             assert r.status == 502 and "not reachable" in (await r.json())["error"]
             assert (await http.delete("/api/remotes/neon")).status == 200
     run(go())
+
+
+def test_last_on_off_sent_is_remembered(tmp_path):
+    async def go():
+        r, _ = make(tmp_path)
+        await r.add_hub(HUB["host"], "hub")
+        r.add_remote("Neon", "hub", "dimmer")
+        assert r.info()["remotes"][0]["on"] is None          # never sent: unknown
+        for b in ("on", "off", "50-percent"):
+            await r.learn("neon", b)
+        await r.press("neon", "on")
+        assert r.info()["remotes"][0]["on"] is True
+        await r.press("neon", "50-percent")                  # other buttons do not change it
+        assert r.info()["remotes"][0]["on"] is True
+        await r.press("neon", "off")
+        assert Remotes(tmp_path, FakeHub()).info()["remotes"][0]["on"] is False   # survives a restart
+    run(go())
