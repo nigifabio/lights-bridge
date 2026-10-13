@@ -1,0 +1,16 @@
+# Home Assistant app (add-on): runs lights-bridge on the Home Assistant machine itself,
+# using that machine's Bluetooth adapter through the host's BlueZ.
+name: Lights bridge
+description: Web page and API for cheap Bluetooth lights and infrared remotes
+version: "1.0.0"
+slug: lights_bridge
+url: https://github.com/nigifabio/lights-bridge
+arch:
+  - amd64
+  - aarch64
+init: false
+boot: auto
+startup: services
+host_network: true   # Sonos discovery (follow-music) and the Broadlink hub need the LAN
+host_dbus: true      # BlueZ on the host
+webui: http://[HOST]:[PORT:8765]

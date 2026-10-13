@@ -170,6 +170,15 @@ lights_bridge:
 The bridge still does the Bluetooth work and verifies every command; Home Assistant only talks
 to its HTTP API, so it can run on another machine with no Bluetooth of its own.
 
+### Run the bridge inside Home Assistant OS
+
+If the Home Assistant machine has the Bluetooth adapter, the bridge can run there as a local app
+(add-on): copy [`homeassistant/app/lights_bridge`](homeassistant/app/lights_bridge) to the
+`addons` share (`/addons/lights_bridge`), reload the app store, install **Lights bridge** from the
+local apps and start it. It uses the published image, the host's BlueZ (`host_dbus`) and host
+networking, and keeps its data in the app's own `/data`. Then point the integration at
+`http://127.0.0.1:8765`. The bridge's own page stays available on port 8765.
+
 ## Limits worth knowing
 
 - **No authentication.** Anyone who can reach the port can switch your lights. Keep it on your LAN
