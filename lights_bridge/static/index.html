@@ -376,24 +376,59 @@ function act(fn, msgEl) {
     renderRemotes();
   };
 }
+// Guided teaching: walk through every untaught button of one remote, one press each.
+let teach = null;            // {rid, bid} while running
+const teachNote = {};        // remote id -> last result line
+async function teachAll(rid) {
+  teach = { rid, bid: null };
+  delete teachNote[rid];
+  while (teach) {
+    const r = R.remotes.find(x => x.id === rid);
+    const b = r && r.buttons.find(b => !b.learned);
+    if (!b) { teachNote[rid] = "All buttons are taught."; break; }
+    teach.bid = b.id;
+    renderRemotes();
+    const hub = R.hubs.find(h => h.id === r.hub) || {};
+    try {
+      R = await api("POST", `api/remotes/${rid}/buttons/${b.id}/learn`, { kind: hub.rf ? (learnKind[rid] || "ir") : "ir" });
+    } catch (e) {
+      if (teach) teachNote[rid] = `Stopped at “${b.name}”: ${e.message}. Tap “Teach all remaining” to continue.`;
+      break;
+    }
+    if (!teach) break;
+    teach.bid = null;
+    renderRemotes();
+    await new Promise(ok => setTimeout(ok, 1200));   // let go of the button before the next one
+  }
+  teach = null;
+  renderRemotes();
+}
+
 function remoteCard(r) {
   const edit = !!editing[r.id], kind = learnKind[r.id] || "ir";
+  const teaching = teach && teach.rid === r.id;
+  const left = r.buttons.filter(b => !b.learned).length;
+  const cur = teaching && r.buttons.find(b => b.id === teach.bid);
   const hub = R.hubs.find(h => h.id === r.hub) || {};
   const el = document.createElement("div");
   el.className = "card";
-  el.innerHTML = `<div class="top"><div class="name"><b>${esc(r.name)}</b><small class="rmsg">${edit
-      ? "Tap a button, then press it on the real remote, pointed at the hub." : "Tap a button to send it. Dashed buttons are not taught yet."}</small></div>
-      <button class="btn redit">${edit ? "Done" : "Edit"}</button></div>
+  el.innerHTML = `<div class="top"><div class="name"><b>${esc(r.name)}</b><small class="rmsg">${teaching
+      ? (cur ? `Press “${esc(cur.name)}” on the real remote now, pointed at the hub. ${left} left.` : "Got it. Release the button…")
+      : teachNote[r.id] ? esc(teachNote[r.id])
+      : edit ? "Tap a button, then press it on the real remote, pointed at the hub." : "Tap a button to send it. Dashed buttons are not taught yet."}</small></div>
+      <button class="btn redit">${teaching ? "Stop" : edit ? "Done" : "Edit"}</button></div>
     <div class="keys"></div>
     <div class="rtools" ${edit ? "" : "hidden"}>
       <span class="seg" ${hub.rf ? "" : "hidden"}><button data-k="ir" class="${kind === "ir" ? "sel" : ""}">Infrared</button><button data-k="rf" class="${kind === "rf" ? "sel" : ""}">Radio</button></span>
+      <button class="btn tall" ${left && !teaching ? "" : "hidden"}>Teach all remaining (${left})</button>
       <input placeholder="New button name" aria-label="New button name"><button class="btn badd">Add button</button>
       <button class="link rdel">Remove remote</button>
     </div>`;
   const msg = el.querySelector(".rmsg"), keys = el.querySelector(".keys");
   for (const b of r.buttons) {
     const k = document.createElement("button");
-    k.className = "key" + (b.learned ? "" : " new");
+    k.className = "key" + (b.learned ? "" : " new") + (cur && cur.id === b.id ? " wait" : "");
+    k.disabled = !!teaching;
     k.innerHTML = esc(b.name) + (edit ? '<span class="x" aria-label="Delete button">×</span>' : "");
     k.onclick = async ev => {
       if (ev.target.classList.contains("x")) return act(() => api("DELETE", `api/remotes/${r.id}/buttons/${b.id}`), msg)();
@@ -413,7 +448,11 @@ function remoteCard(r) {
     };
     keys.appendChild(k);
   }
-  el.querySelector(".redit").onclick = () => { editing[r.id] = !edit; renderRemotes(); };
+  el.querySelector(".redit").onclick = () => {
+    if (teaching) { teach = null; teachNote[r.id] = "Stopped."; } else editing[r.id] = !edit;
+    renderRemotes();
+  };
+  el.querySelector(".tall").onclick = () => teachAll(r.id);
   el.querySelectorAll(".seg button").forEach(s => s.onclick = () => { learnKind[r.id] = s.dataset.k; renderRemotes(); });
   const input = el.querySelector(".rtools input");
   el.querySelector(".badd").onclick = act(() => api("POST", `api/remotes/${r.id}/buttons`, { name: input.value }), msg);
