@@ -151,6 +151,25 @@ curl -X POST -H 'Content-Type: application/json' -d '{"repeat":3}' http://localh
 This is one-way: the bridge replays buttons and cannot know whether the device is on. Hubs,
 remotes and learned codes are stored in `remotes.json` in the data directory.
 
+## Home Assistant
+
+[`homeassistant/custom_components/lights_bridge`](homeassistant/custom_components/lights_bridge)
+makes the bridge's lights and learned remote buttons show up in Home Assistant. Copy that folder
+to `<config>/custom_components/lights_bridge`, add this to `configuration.yaml` and restart:
+
+```yaml
+lights_bridge:
+  url: http://raspberrypi.local:8765
+```
+
+- Each light becomes a `light` entity: on/off, brightness, colour, and the bridge's patterns
+  (including follow-music) as effects.
+- Each learned remote button becomes a `button` entity, e.g. `button.neon_sign_on`.
+- Lights and buttons added later in the bridge's page appear on their own within seconds.
+
+The bridge still does the Bluetooth work and verifies every command; Home Assistant only talks
+to its HTTP API, so it can run on another machine with no Bluetooth of its own.
+
 ## Limits worth knowing
 
 - **No authentication.** Anyone who can reach the port can switch your lights. Keep it on your LAN
