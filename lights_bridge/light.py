@@ -15,7 +15,16 @@ async def bleak_connect(address):
     if not dev:
         raise RuntimeError("not in range (is it plugged in?)")
     client = BleakClient(dev, timeout=20)
-    await client.connect()
+    try:
+        await client.connect()
+    except BaseException:
+        # a failed connect can leave bleak's D-Bus connection open; over days these pile up
+        # until the system bus refuses new connections for the whole user
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise
     return client
 
 

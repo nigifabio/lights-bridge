@@ -233,6 +233,15 @@ REMOTE_ROUTES = [
 ]
 
 
+async def health(request):
+    """Open file descriptors: a number that keeps growing means connections are leaking."""
+    try:
+        fds = len(os.listdir("/proc/self/fd"))
+    except OSError:
+        fds = None
+    return web.json_response({"ok": True, "open_fds": fds})
+
+
 async def index(request):
     return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
@@ -258,6 +267,7 @@ def create_app(data_dir=None, connector=None, scanner=None, music=None, backgrou
     app.on_cleanup.append(stop)
     app.add_routes([
         web.get("/", index),
+        web.get("/api/health", health),
         web.get("/api/lights", list_lights),
         web.post("/api/lights", add_light),
         web.post("/api/lights/{id}", set_light),
