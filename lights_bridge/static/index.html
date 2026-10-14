@@ -357,8 +357,22 @@ function renderRemotes() {
   for (const h of R.hubs) {
     const el = document.createElement("div");
     el.className = "dev";
-    el.innerHTML = `<div class="who"><b>${esc(h.name)}</b><small>${esc(h.model)} · ${esc(h.host)} · infrared${h.rf ? " + radio" : ""}</small></div><button class="link">Remove</button>`;
-    el.querySelector("button").onclick = act(() => api("DELETE", `api/hubs/${h.id}`));
+    el.innerHTML = `<div class="who"><b>${esc(h.name)}</b><small>${esc(h.model)} · ${esc(h.host)} · infrared${h.rf ? " + radio" : ""}</small></div><button class="btn listen">Listen</button><button class="link rmhub">Remove</button>`;
+    el.querySelector(".rmhub").onclick = act(() => api("DELETE", `api/hubs/${h.id}`));
+    // listen: say what the hub receives when any remote button is pressed
+    const lb = el.querySelector(".listen");
+    lb.onclick = async () => {
+      lb.disabled = true;
+      hubmsg.textContent = "Listening: press one button on any remote, pointed at the hub (30 s)…";
+      try {
+        const g = await api("POST", `api/hubs/${h.id}/listen`, { kind: "ir" });
+        const what = g.protocol === "NEC" ? `NEC, address ${g.address}, command ${g.command}` : `unknown protocol, ${g.bytes} bytes`;
+        const who = g.matches.length ? "This is " + g.matches.map(m => `“${m.button}” of ${m.remote}`).join(" and ") + "."
+                                     : "No taught button uses this signal.";
+        hubmsg.textContent = `Received ${g.kind}: ${what}. ${who}`;
+      } catch (e) { hubmsg.textContent = "Nothing received: " + e.message; }
+      lb.disabled = false;
+    };
     hubs.appendChild(el);
   }
   document.getElementById("newremote").hidden = !R.hubs.length;
