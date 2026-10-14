@@ -176,3 +176,16 @@ def test_scanner_recognises_light_names():
 def test_melk_patterns_are_gentle_on_the_link():
     # at most one frame per second, and music changes colour every second beat with no pulse
     assert Melk.frame_interval >= 1.0 and Melk.beat_only and Melk.beat_every == 2
+
+
+def test_a_dropped_link_is_closed_before_reconnecting():
+    async def go():
+        first, second = FakeClient(), FakeClient()
+        closed = []
+        first.disconnect = lambda: closed.append("first") or asyncio.sleep(0)
+        light = Melk(CFG, connector=Connector(first, second))
+        await light.apply({"on": True})
+        first.is_connected = False                           # the lamp dropped the link by itself
+        await light.apply({"on": False})
+        assert closed == ["first"] and light.client is second
+    run(go())

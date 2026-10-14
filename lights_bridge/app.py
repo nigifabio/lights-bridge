@@ -12,6 +12,7 @@ Remotes (infrared / 433 MHz buttons replayed through a Broadlink hub), see remot
 GET    /api/remotes                               hubs, templates, remotes and their buttons
 POST   /api/hubs/discover                         look for hubs on the LAN
 POST   /api/hubs                                  add a hub: {"host", "name"?}
+POST   /api/hubs/{id}/listen                      wait for one remote button and say what was received
 DELETE /api/hubs/{id}
 POST   /api/remotes                               add a remote: {"name", "hub", "template"?}
 DELETE /api/remotes/{id}
@@ -38,6 +39,7 @@ from .spotify import Spotify
 log = logging.getLogger("lights")
 STATIC = Path(__file__).parent / "static"
 MAC = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$|^[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}$", re.I)
+FD_LIMIT = 300
 DEFAULTS = {"host": "0.0.0.0", "port": 8765, "idle_disconnect": 120, "music": True, "lights": []}
 
 
@@ -215,7 +217,10 @@ def remote_api(fn):
             return web.json_response({"error": str(e)}, status=400)
         except Exception as e:
             return web.json_response({"error": str(e) or type(e).__name__}, status=502)
-        return web.json_response(out if isinstance(out, list) else remotes.info())
+        # discovery lists and listen results are returned as they are; everything else answers
+        # with the full, updated picture so the page can redraw from one response
+        own = isinstance(out, list) or (isinstance(out, dict) and "matches" in out)
+        return web.json_response(out if own else remotes.info())
     return handler
 
 
@@ -223,6 +228,7 @@ REMOTE_ROUTES = [
     ("GET", "/api/remotes", lambda r, m, b: None),
     ("POST", "/api/hubs/discover", lambda r, m, b: r.discover()),
     ("POST", "/api/hubs", lambda r, m, b: r.add_hub(b.get("host"), b.get("name"))),
+    ("POST", "/api/hubs/{id}/listen", lambda r, m, b: r.listen(m["id"], b.get("kind") or "ir")),
     ("DELETE", "/api/hubs/{id}", lambda r, m, b: r.remove_hub(m["id"])),
     ("POST", "/api/remotes", lambda r, m, b: r.add_remote(b.get("name"), b.get("hub"), b.get("template") or "custom")),
     ("DELETE", "/api/remotes/{id}", lambda r, m, b: r.remove_remote(m["id"])),
@@ -239,7 +245,9 @@ async def health(request):
         fds = len(os.listdir("/proc/self/fd"))
     except OSError:
         fds = None
-    return web.json_response({"ok": True, "open_fds": fds})
+    # more than a few dozen means something leaks: answer 503 so a supervisor's watchdog restarts us
+    ok = fds is None or fds < FD_LIMIT
+    return web.json_response({"ok": ok, "open_fds": fds}, status=200 if ok else 503)
 
 
 async def index(request):

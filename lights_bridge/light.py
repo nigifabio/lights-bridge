@@ -8,6 +8,25 @@ from .patterns import SOFT_PATTERNS, hex_to_rgb
 log = logging.getLogger("lights")
 
 
+async def close_client(client):
+    """Disconnect and make sure the client's D-Bus connection is really closed.
+
+    bleak can keep its bus connection open after a failed connect, or when the lamp dropped the
+    link by itself before disconnect() was called. Each leftover is one open socket; a lamp that
+    reconnects every minute exhausts the process's file handles in half a day.
+    """
+    try:
+        await asyncio.wait_for(client.disconnect(), 8)
+    except Exception:
+        pass
+    bus = getattr(getattr(client, "_backend", None), "_bus", None)
+    if bus is not None:
+        try:
+            bus.disconnect()
+        except Exception:
+            pass
+
+
 async def bleak_connect(address):
     """Default connector: find the device and return a connected BleakClient."""
     from bleak import BleakClient, BleakScanner
@@ -18,12 +37,7 @@ async def bleak_connect(address):
     try:
         await client.connect()
     except BaseException:
-        # a failed connect can leave bleak's D-Bus connection open; over days these pile up
-        # until the system bus refuses new connections for the whole user
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        await close_client(client)
         raise
     return client
 
@@ -60,6 +74,7 @@ class Light:
     async def _ensure(self):
         if self.client and self.client.is_connected:
             return
+        await self.disconnect()  # a client whose link dropped still holds resources
         last = None
         for attempt in range(self.connect_attempts):
             try:
@@ -80,12 +95,9 @@ class Light:
         pass
 
     async def disconnect(self):
-        if self.client:
-            try:
-                await self.client.disconnect()
-            except Exception:
-                pass
-        self.client = None
+        client, self.client = self.client, None
+        if client:
+            await close_client(client)
 
     async def _write(self, data):
         await self.client.write_gatt_char(self.write_uuid, data, response=False)

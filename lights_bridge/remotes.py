@@ -32,6 +32,36 @@ TEMPLATES = {
 }
 
 
+def decode(code):
+    """Describe a Broadlink-format recording: {"kind", "protocol", "address", "command", "bytes"}.
+
+    Only NEC (the usual protocol of cheap remotes) is decoded to address and command; anything
+    else is reported as unknown with its size. Two presses of the same NEC button decode to the
+    same address and command even though the raw recordings always differ a little.
+    """
+    out = {"kind": {0x26: "infrared", 0xB2: "radio 433 MHz", 0xD7: "radio 315 MHz"}.get(code[0], "unknown"),
+           "protocol": "unknown", "bytes": len(code)}
+    n = code[2] | code[3] << 8
+    p, t, i = code[4:4 + n], [], 0
+    while i < len(p):  # durations in 1/32768 s; a 0x00 byte announces a 2-byte value
+        if p[i] == 0 and i + 2 < len(p):
+            t.append(p[i + 1] << 8 | p[i + 2]); i += 3
+        else:
+            t.append(p[i]); i += 1
+    start = next((s for s in range(len(t) - 1) if t[s] > 200 and t[s + 1] > 100), None)  # 9 ms + 4.5 ms
+    if out["kind"] != "infrared" or start is None:
+        return out
+    bits, i = [], start + 2
+    while len(bits) < 32 and i + 1 < len(t):
+        bits.append(1 if t[i + 1] > 36 else 0); i += 2
+    if len(bits) < 32:
+        return out
+    b = [sum(bits[k * 8 + j] << j for j in range(8)) for k in range(4)]
+    if b[2] ^ b[3] != 0xFF:
+        return out
+    return {**out, "protocol": "NEC", "address": f"{b[0]:02x}{b[1]:02x}", "command": f"{b[2]:02x}"}
+
+
 def slug(name, taken, fallback="item"):
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or fallback
     out, n = base, 2
@@ -233,6 +263,27 @@ class Remotes:
         b["code"] = base64.b64encode(code).decode()
         b["kind"] = kind
         self.save()
+
+    async def listen(self, hid, kind="ir"):
+        """Wait for one button press on any remote and report what the hub received."""
+        if kind not in ("ir", "rf"):
+            raise ValueError("kind must be ir or rf")
+        hub = self._hub(hid)
+        async with self.lock:
+            code = await self._run(self.backend.learn_ir if kind == "ir" else self.backend.learn_rf, hub)
+        got = decode(code)
+        known = []
+        for r in self.data["remotes"]:
+            for b in r["buttons"]:
+                if not b.get("code"):
+                    continue
+                raw = base64.b64decode(b["code"])
+                same = raw == code or (got["protocol"] != "unknown" and
+                                       {k: v for k, v in decode(raw).items() if k != "bytes"} ==
+                                       {k: v for k, v in got.items() if k != "bytes"})
+                if same:
+                    known.append({"remote": r["name"], "button": b["name"]})
+        return {**got, "matches": known, "code": base64.b64encode(code).decode()}
 
     async def press(self, rid, bid, repeat=1):
         b = self._button(rid, bid)

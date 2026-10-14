@@ -14,3 +14,4 @@ startup: services
 host_network: true   # Sonos discovery (follow-music) and the Broadlink hub need the LAN
 host_dbus: true      # BlueZ on the host
 webui: http://[HOST]:[PORT:8765]
+watchdog: http://[HOST]:[PORT:8765]/api/health   # restart the app if it stops answering or reports a leak

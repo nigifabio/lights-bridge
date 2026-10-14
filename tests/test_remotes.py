@@ -164,3 +164,41 @@ def test_last_on_off_sent_is_remembered(tmp_path):
         await r.press("neon", "off")
         assert Remotes(tmp_path, FakeHub()).info()["remotes"][0]["on"] is False   # survives a restart
     run(go())
+
+
+def nec(address, command, jitter=0):
+    """A Broadlink-format NEC recording, like the hub produces (timings in 1/32768 s)."""
+    bits = []
+    for byte in (address >> 8, address & 0xFF, command, command ^ 0xFF):
+        bits += [(byte >> i) & 1 for i in range(8)]
+    pulses = [0x00, 0x01, 0x27, 0x94]                      # 9 ms mark (2-byte value), 4.5 ms space
+    for b in bits:
+        pulses += [0x12 + jitter, 0x37 if b else 0x12]
+    pulses += [0x12, 0x00, 0x05, 0x00]
+    return bytes([0x26, 0x00, len(pulses) & 0xFF, len(pulses) >> 8, *pulses])
+
+
+def test_decode_reads_nec_and_ignores_timing_jitter():
+    from lights_bridge.remotes import decode
+    a, b = decode(nec(0x00FF, 0x05)), decode(nec(0x00FF, 0x05, jitter=2))
+    assert a["protocol"] == "NEC" and a["address"] == "00ff" and a["command"] == "05" and a["kind"] == "infrared"
+    assert {k: a[k] for k in ("address", "command")} == {k: b[k] for k in ("address", "command")}
+    assert decode(nec(0x00FF, 0x04))["command"] == "04"
+    assert decode(b"\x26\x00\x04\x00\x10\x10\x10\x10")["protocol"] == "unknown"
+    assert decode(b"\xb2\x00\x02\x00\x10\x10")["kind"] == "radio 433 MHz"
+
+
+def test_listen_names_the_button_it_recognises(tmp_path):
+    async def go():
+        r, hub = make(tmp_path)
+        await r.add_hub(HUB["host"], "hub")
+        r.add_remote("Neon", "hub", "dimmer")
+        hub.next_code = nec(0x00FF, 0x05)
+        await r.learn("neon", "on")
+        hub.next_code = nec(0x00FF, 0x05, jitter=1)          # same button pressed again
+        got = await r.listen("hub")
+        assert got["command"] == "05" and got["matches"] == [{"remote": "Neon", "button": "On"}]
+        hub.next_code = nec(0x00FF, 0x1B)                    # a button nobody taught
+        got = await r.listen("hub")
+        assert got["command"] == "1b" and got["matches"] == []
+    run(go())
